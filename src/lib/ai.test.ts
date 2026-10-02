@@ -77,3 +77,19 @@ describe('checking the answer', () => {
     expect(() => validateAnswer({ nope: 1 }, built, items)).toThrow(/no list of changes/)
   })
 })
+
+describe('models that refuse a forced tool call', () => {
+  it('retries without forcing the tool, and accepts a tool call on the retry', async () => {
+    const { request } = buildRequest([weekly], items, 'm', { maskPeople: false, maskTerms: [] })
+    const choices: unknown[] = []
+    const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body))
+      choices.push(body.tool_choice)
+      if (body.tool_choice.type === 'tool') return new Response(JSON.stringify({ error: { message: 'tool_choice: not supported' } }), { status: 400 })
+      return new Response(JSON.stringify({ content: [{ type: 'thinking' }, { type: 'tool_use', name: 'record_raid_changes', input: { changes: [] } }] }))
+    })
+    await expect(callClaude(request, 'k', fetchMock as unknown as typeof fetch)).resolves.toEqual({ changes: [] })
+    expect(choices).toEqual([{ type: 'tool', name: 'record_raid_changes' }, { type: 'auto' }])
+    expect(request.messages[0].content).toMatch(/by calling the record_raid_changes tool/)
+  })
+})

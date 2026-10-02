@@ -36,7 +36,7 @@ RAID logs go stale. The information is there, spread across meeting notes, statu
 - Only notes and the open items' ID, type, title, status and owner are sent.
 - Owners' names, and any terms you list, are swapped for placeholders (`PERSON_3`, `TERM_1`) before sending and restored in the answer. Emails and links are removed.
 - You can preview the exact text that will be sent.
-- The answer comes back through a forced tool call with a JSON schema, and each proposal is checked: its quote must appear word for word in the notes it cites, any item it updates or closes must exist, and a "new" item that looks like an existing one is flagged. Problems are shown on the proposal rather than silently dropped.
+- The answer comes back through a tool call with a JSON schema (forced where the model allows it, otherwise offered, with a plain-JSON fallback), and each proposal is checked: its quote must appear word for word in the notes it cites, any item it updates or closes must exist, and a "new" item that looks like an existing one is flagged. Problems are shown on the proposal rather than silently dropped.
 
 ![Redaction and payload preview](docs/claude.png)
 

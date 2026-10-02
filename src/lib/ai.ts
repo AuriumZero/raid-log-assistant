@@ -113,14 +113,14 @@ export function buildRequest(sources: Source[], items: RaidItem[], model: string
   const content =
     `<raid_log>\n${JSON.stringify(log, null, 2)}\n</raid_log>\n\n` +
     sent.map((s) => `<notes source_id="${s.id}">\n${s.text}\n</notes>`).join('\n\n') +
-    '\n\nRecord every change these notes imply for the RAID log.'
+    `\n\nRecord every change these notes imply for the RAID log by calling the ${TOOL_NAME} tool.`
   return {
     request: {
       model,
       max_tokens: 4000,
       system: SYSTEM_PROMPT,
       tools: [{ name: TOOL_NAME, description: 'Record proposed changes to the RAID log.', input_schema: OUTPUT_SCHEMA }],
-      tool_choice: { type: 'tool', name: TOOL_NAME },
+      tool_choice: { type: 'tool', name: TOOL_NAME } as { type: 'tool' | 'auto'; name?: string },
       messages: [{ role: 'user', content }],
     },
     sent,
@@ -130,7 +130,35 @@ export function buildRequest(sources: Source[], items: RaidItem[], model: string
 
 export class AiError extends Error {}
 
-export async function callClaude(request: ReturnType<typeof buildRequest>['request'], apiKey: string, fetchImpl: typeof fetch = fetch): Promise<unknown> {
+export async function callClaude(request: Request, apiKey: string, fetchImpl: typeof fetch = fetch): Promise<unknown> {
+  let body = await post(request, apiKey, fetchImpl)
+  // Some models (for example with extended thinking on by default) don't accept a
+  // forced tool call. Ask again with the tool offered but not forced; the prompt
+  // still tells the model to use it.
+  if ('retryWithoutForcing' in body) body = await post({ ...request, tool_choice: { type: 'auto' } }, apiKey, fetchImpl)
+  if ('retryWithoutForcing' in body) throw new AiError(body.message)
+  const content = body.content ?? []
+  const tool = content.find((c) => c.type === 'tool_use' && c.name === TOOL_NAME)
+  if (tool) return tool.input
+  // No tool call: accept a JSON object written as plain text instead.
+  const text = content.filter((c) => c.type === 'text').map((c) => c.text ?? '').join('\n')
+  const json = text.replace(/```(?:json)?/g, '')
+  const start = json.indexOf('{')
+  const end = json.lastIndexOf('}')
+  if (start >= 0 && end > start) {
+    try {
+      return JSON.parse(json.slice(start, end + 1))
+    } catch {
+      /* fall through */
+    }
+  }
+  throw new AiError('The model did not return changes in the expected format.')
+}
+
+type Request = ReturnType<typeof buildRequest>['request']
+type ApiBody = { content?: { type: string; name?: string; input?: unknown; text?: string }[] }
+
+async function post(request: Request, apiKey: string, fetchImpl: typeof fetch): Promise<ApiBody | { retryWithoutForcing: true; message: string }> {
   let res: Response
   try {
     res = await fetchImpl('https://api.anthropic.com/v1/messages', {
@@ -155,15 +183,14 @@ export async function callClaude(request: ReturnType<typeof buildRequest>['reque
     } catch {
       /* not JSON */
     }
+    const message = `The API returned an error (${res.status})${detail ? `: ${detail}` : ''}.`
+    if (res.status === 400 && /tool_choice/i.test(detail) && request.tool_choice.type === 'tool') return { retryWithoutForcing: true, message }
     if (res.status === 401) throw new AiError('The API key was rejected. Check that it was copied in full.')
     if (res.status === 404) throw new AiError(`Model not found${detail ? `: ${detail}` : ''}. Try another model.`)
     if (res.status === 429) throw new AiError('Rate limited by the API. Wait a moment and try again.')
-    throw new AiError(`The API returned an error (${res.status})${detail ? `: ${detail}` : ''}.`)
+    throw new AiError(message)
   }
-  const body = (await res.json()) as { content?: { type: string; name?: string; input?: unknown }[] }
-  const block = body.content?.find((c) => c.type === 'tool_use' && c.name === TOOL_NAME)
-  if (!block) throw new AiError('The model did not return changes in the expected format.')
-  return block.input
+  return (await res.json()) as ApiBody
 }
 
 /** Lower case, straight quotes, single spaces: so a quote still matches after small formatting differences. */
