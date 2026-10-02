@@ -1,0 +1,7 @@
+Steering committee - 30 Sep 2026
+
+Decision: cutover date stays at 20 Oct.
+Concern raised by Finance: if the sales reconciliation is not signed off by 10 Oct, the cutover date is at risk. This is a major risk for the program.
+Data Platform depends on the Security team approving the new service accounts before cutover; approval is now expected 8 Oct.
+Third-party schema changes have broken two loads this quarter and schema drift detection is not in place yet. Owner: Priya Natarajan.
+Budget: no change.
